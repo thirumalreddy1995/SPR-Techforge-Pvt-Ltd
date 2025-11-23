@@ -1,0 +1,5 @@
+{
+  "name": "SPR Techforge Management",
+  "description": "A comprehensive consultancy management application for SPR Techforge Pvt Ltd. Features candidate tracking, financial accounting, ledger management, and transaction reporting with a high-end UI.",
+  "requestFramePermissions": []
+}
