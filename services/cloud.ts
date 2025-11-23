@@ -1,4 +1,4 @@
-
+// services/cloud.ts
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { 
   getFirestore, 
@@ -9,7 +9,12 @@ import {
   setDoc, 
   deleteDoc, 
   writeBatch,
-  getDoc
+  getDoc,
+  // types
+  type QuerySnapshot,
+  type DocumentSnapshot,
+  type DocumentData,
+  type FirestoreError
 } from 'firebase/firestore';
 
 const STORAGE_KEY_CONFIG = 'SPR_TECHFORGE_FIREBASE_CONFIG';
@@ -36,7 +41,7 @@ class CloudService {
     try {
       const storedConfig = localStorage.getItem(STORAGE_KEY_CONFIG);
       if (storedConfig) {
-        const config = JSON.parse(storedConfig);
+        const config = JSON.parse(storedConfig) as FirebaseConfig;
         if (config.projectId && config.apiKey) {
            try {
               this.app = initializeApp(config);
@@ -77,7 +82,7 @@ class CloudService {
   
   public async testConfig(configString: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const config = JSON.parse(configString);
+      const config = JSON.parse(configString) as FirebaseConfig;
       
       // Validate basic fields
       if (!config.projectId || !config.apiKey || !config.appId) {
@@ -88,17 +93,17 @@ class CloudService {
       const tempDb = getFirestore(tempApp);
       
       // Try to access a dummy document to verify connection permissions
-      // We don't need to write, just referencing a doc reference is synchronous, 
-      // so we try to read a non-existent doc to test connectivity
       try {
         const ref = doc(tempDb, 'system_check', 'connection_test');
         await getDoc(ref); // This will fail if network or permissions are blocked
       } catch (dbErr: any) {
          // If it's a permission denied, we are connected but rules block us (which is okay for connectivity check)
          // If it's network error, it will throw code 'unavailable'
-         if (dbErr.code === 'unavailable' || dbErr.code === 'failed-precondition') {
+         const code = (dbErr && dbErr.code) ? dbErr.code : undefined;
+         if (code === 'unavailable' || code === 'failed-precondition') {
             return { success: false, error: "Could not reach Firebase. Check your internet connection." };
          }
+         // permission errors (e.g., 'permission-denied') are fine — config is valid
       }
       
       return { success: true };
@@ -109,23 +114,31 @@ class CloudService {
 
   // --- Real-time Listeners ---
 
-  public subscribe(tableName: string, callback: (data: any[]) => void, onError?: (error: any) => void) {
+  /**
+   * Subscribe to a collection and receive typed callbacks.
+   * callback receives an array of items (document data plus .id)
+   */
+  public subscribe(
+    tableName: string, 
+    callback: (data: any[]) => void, 
+    onError?: (error: FirestoreError) => void
+  ) {
     if (!this.db) return () => {};
     
     // In Firestore, 'tableName' maps to 'Collection Name'
     const colRef = collection(this.db, tableName);
 
-    const unsubscribe = onSnapshot(colRef, 
-      (snapshot) => {
+    const unsubscribe = onSnapshot(
+      colRef, 
+      (snapshot: QuerySnapshot<DocumentData>) => {
         const items: any[] = [];
-        snapshot.forEach((doc) => {
-            // We assume the document data contains the ID, but we also ensure it matches the doc ID
-            items.push({ ...doc.data(), id: doc.id });
+        snapshot.forEach((d: DocumentSnapshot<DocumentData>) => {
+            items.push({ ...d.data(), id: d.id });
         });
         console.log(`Sync: Received ${items.length} items from ${tableName}`);
         callback(items);
       }, 
-      (error) => {
+      (error: FirestoreError) => {
         console.error(`Error subscribing to ${tableName}:`, error);
         if (onError) onError(error);
       }
